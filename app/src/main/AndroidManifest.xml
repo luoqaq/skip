@@ -13,6 +13,10 @@
     <!-- 跳过成功时的轻微震动反馈（可选开启） -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- 仅用于用户在「设置 › 检查更新」中手动检查并下载应用更新，后台无障碍服务进程不联网 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".SkipApp"
         android:allowBackup="false"
@@ -46,5 +50,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

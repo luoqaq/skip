@@ -64,6 +64,8 @@ object SkipStore {
                 paused = json.optBoolean("paused", false),
                 preciseEnabled = json.optBoolean("preciseEnabled", true),
                 genericEnabled = json.optBoolean("genericEnabled", true),
+                windowSeconds = json.optInt("windowSeconds", DEFAULT_WINDOW_SECONDS)
+                    .coerceIn(MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS),
                 vibrateEnabled = json.optBoolean("vibrateEnabled", false),
                 skipToastEnabled = json.optBoolean("skipToastEnabled", true),
                 themeMode = json.optString("themeMode", "system").takeIf { it in setOf("system", "light", "dark") } ?: "system",
@@ -89,6 +91,7 @@ object SkipStore {
             .put("paused", config.paused)
             .put("preciseEnabled", config.preciseEnabled)
             .put("genericEnabled", config.genericEnabled)
+            .put("windowSeconds", config.windowSeconds.coerceIn(MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS))
             .put("vibrateEnabled", config.vibrateEnabled)
             .put("skipToastEnabled", config.skipToastEnabled)
             .put("themeMode", config.themeMode)
@@ -272,6 +275,7 @@ object SkipStore {
                     .put("type", it.type)
                     .put("viewId", it.viewId ?: "")
                     .put("texts", JSONArray(it.texts))
+                    .put("intentUri", it.intentUri ?: "")
             }))
         atomicWrite(customRulesFile(ctx), json.toString())
         return rules.size
@@ -294,6 +298,7 @@ object SkipStore {
                     (0 until ta.length()).mapNotNull { ta.optString(it, null) }.filter { it.isNotEmpty() }
                 }.takeIf { !it.isNullOrEmpty() } ?: listOf("跳过"),
                 type = o.optString("type", "splash"),
+                intentUri = o.optString("intentUri").takeIf { it.isNotEmpty() },
             )
         }
     } catch (_: Exception) {

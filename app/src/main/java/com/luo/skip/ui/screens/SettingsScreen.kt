@@ -3,7 +3,12 @@ package com.luo.skip.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -19,17 +24,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,13 +85,41 @@ fun SettingsScreen(appState: AppState, onBack: () -> Unit) {
     val toast = remember { ToastController() }
     val cfg = appState.config
     val batteryOk = appState.ignoringBattery
-    val version = remember { com.luo.skip.BuildConfig.VERSION_NAME }
+    val version = remember { "${com.luo.skip.BuildConfig.VERSION_NAME} (${com.luo.skip.BuildConfig.VERSION_CODE})" }
+    val upd = appState.updateState
 
     var showClearDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var showLockDemoDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var pendingAutoOpenUpdate by remember { mutableStateOf(false) }
     var devTaps by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(upd.release, upd.checking) {
+        if (pendingAutoOpenUpdate && !upd.checking) {
+            pendingAutoOpenUpdate = false
+            if (upd.release != null) {
+                showUpdateDialog = true
+            }
+        }
+    }
+
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (context.packageManager.canRequestPackageInstalls()) {
+            appState.setUpdateMessage("已允许安装更新，请点击「安装更新」。")
+        } else {
+            appState.setUpdateMessage("尚未允许安装更新，开启后可继续安装。")
+        }
+    }
+
+    val installerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        appState.setUpdateMessage("如已完成安装，重新打开即生效；取消后可再次安装。")
+    }
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
         Column(
@@ -238,6 +275,47 @@ fun SettingsScreen(appState: AppState, onBack: () -> Unit) {
                         )
                         ListCardDivider()
                         ListRow(
+                            title = "检查更新",
+                            desc = when {
+                                !appState.updateConfigured -> "更新服务尚未配置"
+                                upd.checking -> "正在检查更新…"
+                                upd.downloading -> "正在下载更新 ${(upd.received * 100 / (upd.release?.size ?: 1L)).coerceIn(0, 100)}%"
+                                upd.downloaded != null && upd.release != null -> "新版本 ${upd.release.versionName} (${upd.release.versionCode}) 已就绪，点击安装"
+                                upd.release != null -> "发现新版本 ${upd.release.versionName} (${upd.release.versionCode})"
+                                upd.message != null -> upd.message
+                                else -> "从云端通道检查并下载新版本"
+                            },
+                            inset = 18.dp,
+                            onClick = {
+                                if (upd.release != null) {
+                                    showUpdateDialog = true
+                                } else if (!upd.busy) {
+                                    pendingAutoOpenUpdate = true
+                                    appState.checkUpdate { msg -> toast.show(msg) }
+                                }
+                            },
+                            trailing = {
+                                if (upd.release != null) {
+                                    Box(
+                                        Modifier
+                                            .clip(CircleShape)
+                                            .background(c.accentSoft)
+                                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    ) {
+                                        Text(
+                                            if (upd.downloaded != null) "可安装" else "有新版",
+                                            fontSize = 11.5.sp,
+                                            color = c.accent,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                } else {
+                                    Icon(SkipIcons.ChevronRight, null, tint = c.ink3, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                        )
+                        ListCardDivider()
+                        ListRow(
                             title = "隐私说明",
                             inset = 18.dp,
                             onClick = { showPrivacyDialog = true },
@@ -297,13 +375,140 @@ fun SettingsScreen(appState: AppState, onBack: () -> Unit) {
                 Text(
                     "轻跳的无障碍权限只用来识别屏幕上的「跳过」按钮并自动点击：\n\n" +
                         "· 不读取输入内容，不采集任何数据\n" +
-                        "· 完全离线运行，不申请网络权限\n" +
+                        "· 后台无障碍服务 100% 本地离线运行；网络权限仅用于你手动点击「检查更新」时下载安装包\n" +
                         "· 跳过记录、误跳反馈全部保存在本机，可随时清空\n" +
                         "· 默认排除微信、支付宝和银行类应用"
                 )
             },
             confirmButton = {
                 TextButton(onClick = { showPrivacyDialog = false }) { Text("知道了") }
+            },
+        )
+    }
+
+    if (showUpdateDialog && upd.release != null) {
+        val release = upd.release
+        val sizeMb = String.format(Locale.CHINA, "%.2f", release.size / 1024.0 / 1024.0)
+        AlertDialog(
+            onDismissRequest = { if (!upd.downloading) showUpdateDialog = false },
+            title = {
+                Text("发现新版本 ${release.versionName} (${release.versionCode})", fontWeight = FontWeight.SemiBold)
+            },
+            text = {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        "安装包大小：$sizeMb MB · 覆盖安装保留所有配置与记录",
+                        fontSize = 12.5.sp,
+                        color = c.ink3,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                    if (release.notes.isNotBlank()) {
+                        Text(
+                            release.notes,
+                            fontSize = 14.sp,
+                            color = c.ink,
+                            lineHeight = 20.sp,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                    if (upd.downloading) {
+                        val progress = (upd.received.toFloat() / release.size.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                        val percent = (upd.received * 100 / release.size.coerceAtLeast(1L)).coerceIn(0, 100)
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            color = c.accent,
+                            trackColor = c.surface2,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                        )
+                        Text(
+                            "正在下载 $percent%",
+                            fontSize = 12.5.sp,
+                            color = c.ink2,
+                            modifier = Modifier.padding(top = 6.dp),
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                        )
+                    }
+                    upd.message?.let { msg ->
+                        Text(
+                            msg,
+                            fontSize = 12.5.sp,
+                            color = c.ink2,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                when {
+                    upd.downloading -> {
+                        TextButton(onClick = { appState.cancelUpdateDownload() }) {
+                            Text("取消下载", color = c.warn)
+                        }
+                    }
+                    upd.downloaded == null -> {
+                        TextButton(
+                            enabled = !upd.busy,
+                            onClick = { appState.downloadUpdate() },
+                        ) {
+                            Text("下载更新", color = c.accent, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    else -> {
+                        TextButton(
+                            enabled = !upd.busy,
+                            onClick = {
+                                try {
+                                    if (!context.packageManager.canRequestPackageInstalls()) {
+                                        installPermissionLauncher.launch(
+                                            Intent(
+                                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                Uri.parse("package:${context.packageName}"),
+                                            )
+                                        )
+                                    } else {
+                                        appState.prepareInstallIntent { intent ->
+                                            try {
+                                                installerLauncher.launch(intent)
+                                            } catch (e: Exception) {
+                                                appState.reportUpdateError(e)
+                                            }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    appState.reportUpdateError(e)
+                                }
+                            },
+                        ) {
+                            Text(
+                                if (upd.preparingInstall) "正在核验…" else "安装更新",
+                                color = c.accent,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                if (!upd.downloading) {
+                    Row {
+                        if (upd.downloaded != null) {
+                            TextButton(
+                                enabled = !upd.busy,
+                                onClick = {
+                                    pendingAutoOpenUpdate = true
+                                    appState.checkUpdate { msg -> toast.show(msg) }
+                                },
+                            ) {
+                                Text("重新检查", color = c.ink2)
+                            }
+                        }
+                        TextButton(onClick = { showUpdateDialog = false }) { Text("稍后") }
+                    }
+                }
             },
         )
     }

@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,22 +19,33 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.luo.skip.data.MAX_WINDOW_SECONDS
+import com.luo.skip.data.MIN_WINDOW_SECONDS
 import com.luo.skip.data.SkipStore
 import com.luo.skip.ui.AppState
 import com.luo.skip.ui.components.ListCardDivider
@@ -58,6 +70,7 @@ fun StrategyScreen(appState: AppState, onBack: () -> Unit) {
     val toast = remember { ToastController() }
     val cfg = appState.config
     var ruleCount by remember { mutableIntStateOf(0) }
+    var showWindowDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         ruleCount = withContext(Dispatchers.IO) { SkipStore.loadDefaultRules(context).size }
@@ -126,6 +139,27 @@ fun StrategyScreen(appState: AppState, onBack: () -> Unit) {
                                 SkipSwitch(checked = cfg.genericEnabled, onCheckedChange = { appState.setGeneric(it) })
                             },
                         )
+                        ListCardDivider()
+                        ListRow(
+                            title = "开屏检测时长",
+                            desc = "切换应用后在此时间内检测跳过按钮，超时休眠省电",
+                            inset = 18.dp,
+                            onClick = { showWindowDialog = true },
+                            trailing = {
+                                Text(
+                                    "${cfg.windowSeconds} 秒",
+                                    fontSize = 13.sp,
+                                    color = c.ink3,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
+                                )
+                                Icon(
+                                    SkipIcons.ChevronRight,
+                                    null,
+                                    tint = c.ink3,
+                                    modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                                )
+                            },
+                        )
                     }
                 }
             }
@@ -187,6 +221,112 @@ fun StrategyScreen(appState: AppState, onBack: () -> Unit) {
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp),
+        )
+    }
+
+    if (showWindowDialog) {
+        val presets = listOf(5, 10, 15, 20)
+        var inputText by remember(cfg.windowSeconds) { mutableStateOf(cfg.windowSeconds.toString()) }
+        val parsed = inputText.toIntOrNull()
+        val isValid = parsed != null && parsed in MIN_WINDOW_SECONDS..MAX_WINDOW_SECONDS
+
+        AlertDialog(
+            onDismissRequest = { showWindowDialog = false },
+            title = { Text("开屏检测时长", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        "部分应用冷启动较慢，可适当调长检测窗口（${MIN_WINDOW_SECONDS}–${MAX_WINDOW_SECONDS} 秒）。",
+                        fontSize = 13.sp,
+                        color = c.ink2,
+                        lineHeight = 18.sp,
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        presets.forEach { sec ->
+                            val selected = parsed == sec
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (selected) c.accent else c.surface2)
+                                    .clickable { inputText = sec.toString() },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "${sec}秒",
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (selected) c.accentInk else c.ink,
+                                    style = TextStyle(fontFeatureSettings = "tnum"),
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 14.dp)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(c.surface2)
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("自定义", fontSize = 14.sp, color = c.ink2)
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (inputText.isEmpty()) {
+                                Text("${MIN_WINDOW_SECONDS}–${MAX_WINDOW_SECONDS}", fontSize = 14.sp, color = c.ink3)
+                            }
+                            BasicTextField(
+                                value = inputText,
+                                onValueChange = { next ->
+                                    if (next.length <= 2 && next.all { it.isDigit() }) {
+                                        inputText = next
+                                    }
+                                },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                textStyle = TextStyle(
+                                    color = c.ink,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                cursorBrush = SolidColor(c.accent),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        Text("秒", fontSize = 14.sp, color = c.ink3)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = isValid,
+                    onClick = {
+                        val target = parsed ?: return@TextButton
+                        appState.setWindowSeconds(target)
+                        showWindowDialog = false
+                        toast.show("已设为 $target 秒")
+                    },
+                ) {
+                    Text("确定", color = if (isValid) c.accent else c.ink3, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWindowDialog = false }) { Text("取消") }
+            },
         )
     }
 }

@@ -122,7 +122,7 @@ private fun StepAccessibility() {
     val c = LocalSkipColors.current
     Text("开启无障碍服务", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = c.ink, letterSpacing = (-0.4).sp)
     Text(
-        "轻跳靠系统无障碍识别「跳过」按钮。只在打开应用的前 5 秒工作，其余时间休眠。",
+        "轻跳靠系统无障碍识别「跳过」按钮。只在打开应用的前 10 秒工作（可自定义），其余时间休眠。",
         fontSize = 14.sp, color = c.ink2, lineHeight = 22.sp,
         modifier = Modifier.padding(top = 10.dp),
     )
@@ -183,7 +183,7 @@ private fun StepAccessibility() {
 
     // 信任背书
     Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        FactRow("不读取输入内容，不联网")
+        FactRow("不读取输入内容，不上传任何数据")
         FactRow("默认不处理微信、支付宝和银行类应用")
     }
 }

@@ -8,7 +8,13 @@ data class SkipRule(
     val viewId: String? = null,
     val texts: List<String> = listOf("跳过"),
     val type: String = "splash",
+    /** 针对屏蔽无障碍点击的开屏页，匹配到跳过节点后直接触发应用内首页路由（如 damai://home）。 */
+    val intentUri: String? = null,
 )
+
+const val DEFAULT_WINDOW_SECONDS = 10
+const val MIN_WINDOW_SECONDS = 1
+const val MAX_WINDOW_SECONDS = 60
 
 /** 全部配置（config.json，双进程原子读写）。 */
 data class SkipConfig(
@@ -18,6 +24,8 @@ data class SkipConfig(
     val preciseEnabled: Boolean = true,
     /** 通用识别开关。 */
     val genericEnabled: Boolean = true,
+    /** 开屏检测窗口时长（秒），默认 10 秒。 */
+    val windowSeconds: Int = DEFAULT_WINDOW_SECONDS,
     /** 跳过成功轻震动。 */
     val vibrateEnabled: Boolean = false,
     /** 跳过成功顶部轻提示（无障碍浮层，默认开启）。 */

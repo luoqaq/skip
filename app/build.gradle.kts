@@ -17,6 +17,24 @@ fun signingProp(propName: String, envName: String): String? =
     keystoreProperties.getProperty(propName)?.takeIf { it.isNotBlank() }
         ?: System.getenv(envName)?.takeIf { it.isNotBlank() }
 
+val resolvedVersionCode: Int =
+    (findProperty("androidVersionCode") as? String)?.trim()?.toIntOrNull()
+        ?: System.getenv("SKIP_ANDROID_VERSION_CODE")?.trim()?.toIntOrNull()
+        ?: 3
+
+val resolvedVersionName: String =
+    (findProperty("androidVersionName") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: System.getenv("SKIP_ANDROID_VERSION_NAME")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "1.0.0"
+
+val resolvedUpdateUrl: String =
+    (findProperty("androidUpdateUrl") as? String)?.trim()
+        ?: System.getenv("SKIP_ANDROID_UPDATE_URL")?.trim()
+        ?: "https://yanjiu-android-updates.bojin1229.workers.dev/skip/latest.json"
+
+fun escapeBuildConfigString(value: String): String =
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
     namespace = "com.luo.skip"
     compileSdk = 36
@@ -25,8 +43,9 @@ android {
         applicationId = "com.luo.skip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = resolvedVersionCode
+        versionName = resolvedVersionName
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"${escapeBuildConfigString(resolvedUpdateUrl)}\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -61,6 +80,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

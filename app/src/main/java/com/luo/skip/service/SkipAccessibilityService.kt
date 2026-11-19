@@ -21,6 +21,9 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.luo.skip.data.DEFAULT_WINDOW_SECONDS
+import com.luo.skip.data.MAX_WINDOW_SECONDS
+import com.luo.skip.data.MIN_WINDOW_SECONDS
 import com.luo.skip.data.SkipBroadcasts
 import com.luo.skip.data.SkipConfig
 import com.luo.skip.data.SkipLogEntry
@@ -33,19 +36,34 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * :service 独立进程的无障碍服务 —— 低功耗 5 秒窗口期引擎。
+ * :service 独立进程的无障碍服务 —— 低功耗窗口期引擎（默认 10 秒，支持用户自定义）。
  *
  * 事件策略：
- * - 仅当「前台切换为新的非排除 App」时打开 5000ms 检测窗口并立即扫描一次；
+ * - 仅当「前台切换为新的非排除 App」时打开检测窗口并立即扫描一次；
  * - 窗口内 TYPE_WINDOW_CONTENT_CHANGED 按 120ms 节流扫描；
  * - 命中或超时立即关闭窗口；休眠期所有事件 O(1) return，CPU 占用趋近 0%。
  */
 class SkipAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val WINDOW_MS = 5000L
         private const val THROTTLE_MS = 120L
         private const val SYSTEM_UI = "com.android.systemui"
+        private const val PULSE_INTERVAL_MS = 220L
+        private const val MAX_PULSE_COUNT = 12
+        private const val RETRY_DELAY_MS = 450L
+        private const val MAX_GESTURE_RETRIES = 4
+
+        /** 各品牌桌面负一屏/全局搜索/系统浮层包名：切桌面或启动应用过渡期会触发窗口事件，调用 rootInActiveWindow 易阻塞 AMS。 */
+        private val SYSTEM_OVERLAY_PACKAGES = setOf(
+            "com.android.systemui",
+            "com.hihonor.hiboard",
+            "com.hihonor.search",
+            "com.huawei.intelligent",
+            "com.huawei.search",
+            "com.miui.personalassistant",
+            "com.coloros.assistantscreen",
+            "com.vivo.hiboard",
+        )
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -67,6 +85,23 @@ class SkipAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var bannerView: View? = null
     private var bannerHideTask: Runnable? = null
+    private var ttsKeepAlive: android.speech.tts.TextToSpeech? = null
+    private var pulseCount = 0
+    private val pulseScanTask = object : Runnable {
+        override fun run() {
+            if (!windowOpen) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - windowOpenedAt > windowDurationMs()) {
+                closeWindow()
+                return
+            }
+            lastScanAt = now
+            scan()
+            if (windowOpen && ++pulseCount < MAX_PULSE_COUNT) {
+                mainHandler.postDelayed(this, PULSE_INTERVAL_MS)
+            }
+        }
+    }
 
     private val configReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -76,6 +111,7 @@ class SkipAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        initTtsKeepAlive()
         scope.launch { reloadConfig() }
         if (!receiverRegistered) {
             androidx.core.content.ContextCompat.registerReceiver(
@@ -91,6 +127,7 @@ class SkipAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        releaseTtsKeepAlive()
         removeTopBanner()
         if (receiverRegistered) {
             runCatching { unregisterReceiver(configReceiver) }
@@ -120,12 +157,15 @@ class SkipAccessibilityService : AccessibilityService() {
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                // 系统浮层（通知栏/音量条）和输入法不视为切换前台 App，避免误关窗口或切回时误重开窗口
-                if (pkg == SYSTEM_UI || isIme(pkg)) return
+                // 系统浮层（通知栏/音量条/负一屏）、输入法及本应用悬浮提示不视为切换前台 App
+                if (pkg in SYSTEM_OVERLAY_PACKAGES || isIme(pkg)) return
+                if (pkg == packageName && event.className?.toString()?.contains("Activity") != true) return
                 event.className?.toString()?.takeIf { it.isNotEmpty() }?.let { currentActivity = it }
                 if (pkg == foregroundPkg) {
                     // 同一 App 内窗口切换（如开屏 Activity 是独立窗口），窗口期内继续节流扫描
-                    if (windowOpen) throttledScan(now)
+                    if (windowOpen) {
+                        if (now - windowOpenedAt > windowDurationMs()) closeWindow() else throttledScan(now)
+                    }
                     return
                 }
                 // 前台切换到新 App（含桌面/本应用/排除名单）
@@ -139,20 +179,27 @@ class SkipAccessibilityService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 if (!windowOpen) return // 休眠期 O(1) 丢弃
-                if (now - windowOpenedAt > WINDOW_MS) { closeWindow(); return }
+                if (now - windowOpenedAt > windowDurationMs()) { closeWindow(); return }
                 throttledScan(now)
             }
         }
     }
 
+    private fun windowDurationMs(): Long =
+        config.windowSeconds.coerceIn(MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS).toLong() * 1000L
+
     private fun openWindow(now: Long) {
         windowOpen = true
         windowOpenedAt = now
         lastScanAt = 0L
+        pulseCount = 0
+        mainHandler.removeCallbacks(pulseScanTask)
+        mainHandler.postDelayed(pulseScanTask, PULSE_INTERVAL_MS)
     }
 
     private fun closeWindow() {
         windowOpen = false
+        mainHandler.removeCallbacks(pulseScanTask)
     }
 
     private fun throttledScan(now: Long) {
@@ -161,10 +208,10 @@ class SkipAccessibilityService : AccessibilityService() {
         scan()
     }
 
-    /** 需要忽略的包：本应用、桌面、输入法、系统 UI、排除名单。 */
+    /** 需要忽略的包：本应用、桌面、输入法、系统 UI/负一屏、排除名单。 */
     private fun shouldIgnore(pkg: String): Boolean {
         if (pkg == packageName) return true
-        if (pkg == SYSTEM_UI) return true
+        if (pkg in SYSTEM_OVERLAY_PACKAGES) return true
         if (config.excludedPackages.contains(pkg)) return true
         if (isLauncher(pkg)) return true
         if (isIme(pkg)) return true
@@ -222,8 +269,16 @@ class SkipAccessibilityService : AccessibilityService() {
         val appName = match.rule?.appName ?: try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (_: Exception) { pkg }
-        if (config.skipToastEnabled) showTopBanner(appName)
         val activityName = currentActivity
+        if (match.preferGesture && match.rule?.intentUri.isNullOrEmpty()) {
+            // 自绘控件首次点击可能发生在状态栏收起前或广告就绪前，延后弹窗并静默补点
+            scheduleRetryIfStuck(pkg, activityName, attempt = 1)
+            if (config.skipToastEnabled) {
+                mainHandler.postDelayed({ showTopBanner(appName) }, 300L)
+            }
+        } else {
+            if (config.skipToastEnabled) showTopBanner(appName)
+        }
         val viewId = match.node.viewIdResourceName?.takeIf { it.isNotEmpty() }
             ?: if (!match.generic) match.rule?.viewId else null
         val entry = SkipLogEntry(
@@ -242,6 +297,24 @@ class SkipAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun scheduleRetryIfStuck(targetPkg: String, targetActivity: String?, attempt: Int) {
+        mainHandler.postDelayed({
+            if (config.paused) return@postDelayed
+            if (foregroundPkg != targetPkg) return@postDelayed
+            if (targetActivity != null && currentActivity != targetActivity) return@postDelayed
+            val root = rootInActiveWindow ?: return@postDelayed
+            if (root.packageName?.toString() != targetPkg) return@postDelayed
+
+            val metrics = resources.displayMetrics
+            val match = RuleMatcher.findMatch(root, targetPkg, rules, config, metrics.widthPixels, metrics.heightPixels)
+                ?: return@postDelayed
+            val clicked = RuleMatcher.performClick(this, match)
+            if (clicked && attempt < MAX_GESTURE_RETRIES) {
+                scheduleRetryIfStuck(targetPkg, targetActivity, attempt + 1)
+            }
+        }, RETRY_DELAY_MS)
+    }
+
     private fun vibrateLight() {
         try {
             val vibrator = if (Build.VERSION.SDK_INT >= 31) {
@@ -253,6 +326,24 @@ class SkipAccessibilityService : AccessibilityService() {
             if (!vibrator.hasVibrator()) return
             vibrator.vibrate(VibrationEffect.createOneShot(18, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (_: Exception) {}
+    }
+
+    /**
+     * 建立静默 TextToSpeech 绑定（不发声）：
+     * 荣耀/华为 iAware (AwareIntelligentRecg.checkBlind) 仅将同时开启无障碍 (mAccessPkg)
+     * 且绑定了 TTS 服务 (mTtsPkg) 的应用识别为无障碍读屏白名单，豁免应用启动时的 3 秒 cgroup 冻结。
+     */
+    private fun initTtsKeepAlive() {
+        if (ttsKeepAlive != null) return
+        try {
+            ttsKeepAlive = android.speech.tts.TextToSpeech(applicationContext) {}
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseTtsKeepAlive() {
+        val tts = ttsKeepAlive ?: return
+        ttsKeepAlive = null
+        try { tts.shutdown() } catch (_: Exception) {}
     }
 
     /** 跳过成功后在屏幕顶部弹出轻量无障碍胶囊提示（零额外权限、零 Compose 依赖）。 */

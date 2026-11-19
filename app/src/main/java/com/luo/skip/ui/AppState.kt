@@ -18,6 +18,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.luo.skip.BuildConfig
+import com.luo.skip.data.AppRelease
+import com.luo.skip.data.MAX_WINDOW_SECONDS
+import com.luo.skip.data.MIN_WINDOW_SECONDS
 import com.luo.skip.data.SkipBroadcasts
 import com.luo.skip.data.SkipConfig
 import com.luo.skip.data.SkipFeedback
@@ -25,12 +29,28 @@ import com.luo.skip.data.SkipLogData
 import com.luo.skip.data.SkipLogEntry
 import com.luo.skip.data.SkipServiceState
 import com.luo.skip.data.SkipStore
+import com.luo.skip.data.SkipUpdater
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+
+data class AppUpdateState(
+    val checking: Boolean = false,
+    val downloading: Boolean = false,
+    val preparingInstall: Boolean = false,
+    val release: AppRelease? = null,
+    val downloaded: File? = null,
+    val received: Long = 0,
+    val message: String? = null,
+) {
+    val busy: Boolean get() = checking || downloading || preparingInstall
+}
 
 /**
  * 主进程 UI 状态：文件为准，IO 线程读写，广播/生命周期触发刷新。
@@ -40,6 +60,12 @@ class AppState(private val context: Context) {
 
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val updater = SkipUpdater(appContext, BuildConfig.UPDATE_MANIFEST_URL)
+    private var updateJob: Job? = null
+
+    val updateConfigured: Boolean get() = updater.manifestUrl.isNotEmpty()
+    var updateState by mutableStateOf(AppUpdateState())
+        private set
 
     var loaded by mutableStateOf(false)
         private set
@@ -53,6 +79,25 @@ class AppState(private val context: Context) {
         private set
     var ignoringBattery by mutableStateOf(false)
         private set
+
+    init {
+        if (updateConfigured) {
+            updateJob = scope.launch {
+                try {
+                    updater.restore()?.let { (release, file) ->
+                        withContext(Dispatchers.Main) {
+                            updateState = updateState.copy(
+                                release = release,
+                                downloaded = file,
+                                received = release.size,
+                                message = "安装包已就绪，可继续安装。",
+                            )
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     fun refresh() {
         scope.launch {
@@ -95,6 +140,9 @@ class AppState(private val context: Context) {
     fun togglePaused(paused: Boolean) = updateConfig { it.copy(paused = paused) }
     fun setPrecise(on: Boolean) = updateConfig { it.copy(preciseEnabled = on) }
     fun setGeneric(on: Boolean) = updateConfig { it.copy(genericEnabled = on) }
+    fun setWindowSeconds(seconds: Int) = updateConfig {
+        it.copy(windowSeconds = seconds.coerceIn(MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS))
+    }
     fun setVibrate(on: Boolean) = updateConfig { it.copy(vibrateEnabled = on) }
     fun setSkipToast(on: Boolean) = updateConfig { it.copy(skipToastEnabled = on) }
     fun setThemeMode(mode: String) = updateConfig { it.copy(themeMode = mode) }
@@ -171,6 +219,156 @@ class AppState(private val context: Context) {
                 onResult(count)
             }
         }
+    }
+
+    // ---------- 远程应用内更新 ----------
+
+    fun checkUpdate(onToast: ((String) -> Unit)? = null) {
+        if (!updateConfigured) {
+            onToast?.invoke("更新服务尚未配置")
+            return
+        }
+        if (updateState.busy) return
+        updateState = updateState.copy(
+            checking = true,
+            release = null,
+            downloaded = null,
+            received = 0,
+            message = null,
+        )
+        updateJob = scope.launch {
+            try {
+                val restored = updater.restore()
+                val release = updater.check()
+                withContext(Dispatchers.Main) {
+                    if (release == null) {
+                        updateState = updateState.copy(
+                            release = null,
+                            downloaded = null,
+                            received = 0,
+                            message = "当前已是最新版本。",
+                        )
+                        onToast?.invoke("当前已是最新版本")
+                    } else if (restored != null && restored.first.versionCode == release.versionCode && restored.first.sha256 == release.sha256) {
+                        updateState = updateState.copy(
+                            release = release,
+                            downloaded = restored.second,
+                            received = release.size,
+                            message = "安装包已就绪，可继续安装。",
+                        )
+                    } else {
+                        updateState = updateState.copy(
+                            release = release,
+                            downloaded = null,
+                            received = 0,
+                            message = null,
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    val msg = formatUpdateError(e)
+                    updateState = updateState.copy(message = msg)
+                    onToast?.invoke(msg)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(checking = false)
+                }
+            }
+        }
+    }
+
+    fun downloadUpdate() {
+        val current = updateState
+        val release = current.release ?: return
+        if (current.busy) return
+        updateState = current.copy(downloading = true, downloaded = null, received = 0, message = null)
+        updateJob = scope.launch {
+            try {
+                var lastPercent = -1L
+                val file = updater.download(release) { count ->
+                    val percent = count * 100 / release.size
+                    if (percent != lastPercent) {
+                        lastPercent = percent
+                        scope.launch(Dispatchers.Main) {
+                            if (updateState.downloading) {
+                                updateState = updateState.copy(received = count)
+                            }
+                        }
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(
+                        downloaded = file,
+                        received = release.size,
+                        message = "下载完成，安装包已通过校验。",
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(message = formatUpdateError(e))
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(downloading = false)
+                }
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        if (updateState.downloading) {
+            updateJob?.cancel()
+            updateState = updateState.copy(downloading = false, message = "下载已取消，可重新下载。")
+        }
+    }
+
+    fun prepareInstallIntent(onReady: (Intent) -> Unit) {
+        val current = updateState
+        val release = current.release ?: return
+        val file = current.downloaded ?: return
+        if (current.busy) return
+        updateState = current.copy(preparingInstall = true, message = null)
+        scope.launch {
+            try {
+                val intent = updater.installIntent(file, release)
+                withContext(Dispatchers.Main) {
+                    onReady(intent)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(
+                        downloaded = null,
+                        message = formatUpdateError(e),
+                    )
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    updateState = updateState.copy(preparingInstall = false)
+                }
+            }
+        }
+    }
+
+    fun setUpdateMessage(msg: String?) {
+        updateState = updateState.copy(message = msg)
+    }
+
+    fun reportUpdateError(error: Exception) {
+        updateState = updateState.copy(message = formatUpdateError(error))
+    }
+
+    private fun formatUpdateError(error: Exception): String = when (error) {
+        is IllegalArgumentException, is IllegalStateException, is java.io.IOException ->
+            error.message?.takeIf { it.any { ch -> ch in '\u4e00'..'\u9fff' } } ?: "更新未完成，请稍后重试。"
+        else -> "无法打开安装界面，请稍后重试。"
     }
 }
 

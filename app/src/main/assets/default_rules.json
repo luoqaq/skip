@@ -33,6 +33,8 @@
     { "id": "uc_splash", "appName": "UC浏览器", "packageName": "com.UCMobile", "type": "splash", "texts": ["跳过"] },
     { "id": "qq_splash", "appName": "QQ", "packageName": "com.tencent.mobileqq", "type": "splash", "texts": ["跳过"] },
     { "id": "tieba_splash", "appName": "百度贴吧", "packageName": "com.baidu.tieba", "type": "splash", "texts": ["跳过"] },
-    { "id": "wps_splash", "appName": "WPS Office", "packageName": "cn.wps.moffice_eng", "type": "splash", "texts": ["跳过", "跳过广告"] }
+    { "id": "wps_splash", "appName": "WPS Office", "packageName": "cn.wps.moffice_eng", "type": "splash", "texts": ["跳过", "跳过广告"] },
+    { "id": "fcbox_splash", "appName": "丰巢", "packageName": "com.fcbox.hivebox", "type": "splash", "texts": ["跳过", "跳过广告"] },
+    { "id": "damai_splash", "appName": "大麦", "packageName": "cn.damai", "type": "splash", "viewId": "cn.damai:id/homepage_advert_pb", "texts": ["跳过", "跳过广告"], "intentUri": "damai://home" }
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "com.luo.skip",
+  "baseUrl": "https://yanjiu-android-updates.bojin1229.workers.dev/skip/",
+  "bucket": "yanjiu-android-updates",
+  "accountId": "6eda59403731501fd84f31b87397b1e9",
+  "expectedSignerSha256": "e7978760b9fd7b3a02d0b3272b5a5a27b09f00efdc97a3604f165b6cf5af7ca7",
+  "authDirectory": "../stock/tools/android-updates/.wrangler/auth"
+}
