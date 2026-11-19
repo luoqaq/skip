@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">轻跳</string>
+    <string name="accessibility_service_label">轻跳 · 开屏广告跳过</string>
+    <string name="accessibility_service_description">仅在切换应用的前 5 秒检测开屏广告的“跳过”按钮并自动点击，其余时间休眠以节省电量。</string>
+</resources>

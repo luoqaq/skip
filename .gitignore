@@ -1,0 +1,18 @@
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+.cxx/
+captures/
+
+# Signing keys & local config
+*.jks
+*.keystore
+keystore.properties
+
+# Local design & planning docs
+docs/
