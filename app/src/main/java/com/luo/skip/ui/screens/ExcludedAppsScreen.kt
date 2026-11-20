@@ -1,7 +1,5 @@
 package com.luo.skip.ui.screens
 
-import android.content.Intent
-import android.content.pm.ApplicationInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -24,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -48,16 +44,8 @@ import com.luo.skip.ui.components.SkipIcons
 import com.luo.skip.ui.components.ToastController
 import com.luo.skip.ui.components.ToastHost
 import com.luo.skip.ui.theme.LocalSkipColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
-
-private data class InstalledApp(
-    val packageName: String,
-    val label: String,
-    val isSystem: Boolean,
-)
 
 /**
  * 04 排除的应用：搜索 + 分组（已排除 / 最近跳过过 / 其他应用）+ 胶囊按钮切换。
@@ -65,32 +53,9 @@ private data class InstalledApp(
 @Composable
 fun ExcludedAppsScreen(appState: AppState, onBack: () -> Unit) {
     val c = LocalSkipColors.current
-    val context = LocalContext.current
     val toast = remember { ToastController() }
     var query by remember { mutableStateOf("") }
-    var apps by remember { mutableStateOf<List<InstalledApp>?>(null) }
-
-    // 一次性加载可启动的用户应用
-    LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.IO) {
-            val pm = context.packageManager
-            val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val resolveInfos = try {
-                pm.queryIntentActivities(launchIntent, 0)
-            } catch (_: Exception) {
-                emptyList()
-            }
-            resolveInfos.mapNotNull { ri ->
-                val ai: ApplicationInfo = ri.activityInfo.applicationInfo ?: return@mapNotNull null
-                if (ai.packageName == context.packageName) return@mapNotNull null
-                InstalledApp(
-                    packageName = ai.packageName,
-                    label = try { pm.getApplicationLabel(ai).toString() } catch (_: Exception) { ai.packageName },
-                    isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
-                )
-            }.distinctBy { it.packageName }.sortedBy { it.label }
-        }
-    }
+    val apps = appState.excludableApps
 
     val excluded = appState.config.excludedPackages
     val todaySkipped = remember(appState.logs) {
@@ -105,7 +70,6 @@ fun ExcludedAppsScreen(appState: AppState, onBack: () -> Unit) {
 
     val filtered = remember(apps, query) {
         apps
-            ?.filter { !it.isSystem }
             ?.filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
     }
     val groups = remember(filtered, excluded, todaySkipped) {

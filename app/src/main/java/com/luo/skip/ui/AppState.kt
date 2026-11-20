@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -53,6 +54,8 @@ data class AppUpdateState(
     val busy: Boolean get() = checking || downloading || preparingInstall
 }
 
+data class ExcludableApp(val packageName: String, val label: String)
+
 /**
  * 主进程 UI 状态：文件为准，IO 线程读写，广播/生命周期触发刷新。
  * 仅在主进程使用，:service 进程不会加载此类。
@@ -71,6 +74,8 @@ class AppState(private val context: Context) {
     var loaded by mutableStateOf(false)
         private set
     var config by mutableStateOf(SkipConfig())
+        private set
+    var excludableApps by mutableStateOf<List<ExcludableApp>?>(null)
         private set
     var logs by mutableStateOf(SkipLogData())
         private set
@@ -97,6 +102,23 @@ class AppState(private val context: Context) {
                     }
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    fun refreshExcludableApps() {
+        scope.launch {
+            val pm = appContext.packageManager
+            val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val activities = runCatching { pm.queryIntentActivities(launchIntent, 0) }.getOrDefault(emptyList())
+            val apps = activities.mapNotNull { resolved ->
+                val info = resolved.activityInfo.applicationInfo ?: return@mapNotNull null
+                if (info.packageName == appContext.packageName || info.flags and ApplicationInfo.FLAG_SYSTEM != 0) {
+                    return@mapNotNull null
+                }
+                val label = runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(info.packageName)
+                ExcludableApp(info.packageName, label)
+            }.distinctBy { it.packageName }.sortedBy { it.label }
+            withContext(Dispatchers.Main) { excludableApps = apps }
         }
     }
 
@@ -449,7 +471,10 @@ fun rememberAppState(): AppState {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) state.refresh()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                state.refresh()
+                state.refreshExcludableApps()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

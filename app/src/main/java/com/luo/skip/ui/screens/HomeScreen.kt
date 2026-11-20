@@ -129,7 +129,9 @@ fun HomeScreen(
             ) {
                 Tile(
                     title = "排除的应用",
-                    desc = "${appState.config.excludedPackages.size} 个应用",
+                    desc = appState.excludableApps
+                        ?.count { it.packageName in appState.config.excludedPackages }
+                        ?.let { "$it 个应用" } ?: "正在加载…",
                     icon = { Icon(SkipIcons.Ban, null, tint = c.accent, modifier = Modifier.size(18.dp)) },
                     onClick = onOpenExcluded,
                     modifier = Modifier.weight(1f),
