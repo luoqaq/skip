@@ -20,7 +20,7 @@ fun signingProp(propName: String, envName: String): String? =
 val resolvedVersionCode: Int =
     (findProperty("androidVersionCode") as? String)?.trim()?.toIntOrNull()
         ?: System.getenv("SKIP_ANDROID_VERSION_CODE")?.trim()?.toIntOrNull()
-        ?: 3
+        ?: 4
 
 val resolvedVersionName: String =
     (findProperty("androidVersionName") as? String)?.trim()?.takeIf { it.isNotEmpty() }
