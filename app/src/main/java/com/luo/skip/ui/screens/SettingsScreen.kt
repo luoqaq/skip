@@ -163,20 +163,29 @@ fun SettingsScreen(appState: AppState, onBack: () -> Unit) {
                             leading = { CheckDot(ok = batteryOk) },
                         )
                         ListCardDivider()
-                        // 允许自启动：跳转设置 + 手动确认
-                        ListRow(
-                            title = "允许自启动",
-                            desc = if (cfg.autoStartConfirmed) "手动确认 · 系统不提供检测" else "点开系统设置后回来打勾",
-                            inset = 18.dp,
-                            onClick = {
-                                SystemNav.tryOpenAutoStart(context)
-                                if (!cfg.autoStartConfirmed) {
-                                    appState.setAutoStartConfirmed(true)
-                                    toast.show("已在系统设置里允许后记为已确认")
-                                }
-                            },
-                            leading = { CheckDot(ok = cfg.autoStartConfirmed) },
-                        )
+                        if (SystemNav.isHonor) {
+                            ListRow(
+                                title = "允许后台活动",
+                                desc = SystemNav.honorBackgroundActivityPath,
+                                inset = 18.dp,
+                                onClick = { SystemNav.openHonorBackgroundSettings(context) },
+                            )
+                        } else {
+                            // 允许自启动：跳转设置 + 手动确认
+                            ListRow(
+                                title = "允许自启动",
+                                desc = if (cfg.autoStartConfirmed) "手动确认 · 系统不提供检测" else "点开系统设置后回来打勾",
+                                inset = 18.dp,
+                                onClick = {
+                                    SystemNav.tryOpenAutoStart(context)
+                                    if (!cfg.autoStartConfirmed) {
+                                        appState.setAutoStartConfirmed(true)
+                                        toast.show("已在系统设置里允许后记为已确认")
+                                    }
+                                },
+                                leading = { CheckDot(ok = cfg.autoStartConfirmed) },
+                            )
+                        }
                         ListCardDivider()
                         // 多任务锁定：看演示 + 手动确认
                         ListRow(

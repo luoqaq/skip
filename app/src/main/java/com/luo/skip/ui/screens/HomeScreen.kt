@@ -354,7 +354,7 @@ private fun GuardCard(
     val context = LocalContext.current
     val cfg = appState.config
     val batteryOk = appState.ignoringBattery
-    val allOk = batteryOk && cfg.autoStartConfirmed && cfg.lockConfirmed
+    val allOk = !SystemNav.isHonor && batteryOk && cfg.autoStartConfirmed && cfg.lockConfirmed
 
     if (hero == HeroState.Broken || !allOk) {
         // 展开的检查清单
@@ -374,21 +374,30 @@ private fun GuardCard(
                     } else null,
                 )
                 ListCardDivider()
-                CheckRow(
-                    title = "允许自启动",
-                    desc = if (cfg.autoStartConfirmed) "手动确认 · 系统不提供检测" else "未确认",
-                    ok = cfg.autoStartConfirmed,
-                    trailing = {
-                        if (!cfg.autoStartConfirmed) Text(
-                            "去设置", fontSize = 13.sp, color = c.accent, fontWeight = FontWeight.SemiBold,
-                        )
-                    },
-                    onClick = {
-                        SystemNav.tryOpenAutoStart(context)
-                        appState.setAutoStartConfirmed(true)
-                        toast.show("已在系统设置里允许后打勾")
-                    },
-                )
+                if (SystemNav.isHonor) {
+                    ListRow(
+                        title = "允许后台活动",
+                        desc = SystemNav.honorBackgroundActivityPath,
+                        inset = 18.dp,
+                        onClick = { SystemNav.openHonorBackgroundSettings(context) },
+                    )
+                } else {
+                    CheckRow(
+                        title = "允许自启动",
+                        desc = if (cfg.autoStartConfirmed) "手动确认 · 系统不提供检测" else "未确认",
+                        ok = cfg.autoStartConfirmed,
+                        trailing = {
+                            if (!cfg.autoStartConfirmed) Text(
+                                "去设置", fontSize = 13.sp, color = c.accent, fontWeight = FontWeight.SemiBold,
+                            )
+                        },
+                        onClick = {
+                            SystemNav.tryOpenAutoStart(context)
+                            appState.setAutoStartConfirmed(true)
+                            toast.show("已在系统设置里允许后打勾")
+                        },
+                    )
+                }
                 ListCardDivider()
                 CheckRow(
                     title = "多任务中锁定",

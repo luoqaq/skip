@@ -106,6 +106,9 @@ fun OnboardingScreen(appState: AppState, onDone: () -> Unit) {
                     }
                     else -> {
                         PrimaryButton("去设置电池无限制") { SystemNav.requestBatteryIgnore(context) }
+                        if (SystemNav.isHonor) {
+                            GhostButton("打开荣耀系统设置") { SystemNav.openHonorBackgroundSettings(context) }
+                        }
                         PrimaryButtonTonal("完成，开始守护") {
                             appState.finishOnboarding()
                             onDone()
@@ -210,13 +213,17 @@ private fun StepGuard() {
     val c = LocalSkipColors.current
     Text("别让系统清理后台", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = c.ink, letterSpacing = (-0.4).sp)
     Text(
-        "省电策略可能悄悄关掉轻跳。完成下面几项，守护就能长期稳定运行。",
+        "系统可能暂停或关闭后台的轻跳，导致开屏广告来不及跳过。",
         fontSize = 14.sp, color = c.ink2, lineHeight = 22.sp,
         modifier = Modifier.padding(top = 10.dp),
     )
     Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         FactRow("电池：允许轻跳「无限制」后台活动")
-        FactRow("自启动：在系统设置里允许轻跳自启动")
+        if (SystemNav.isHonor) {
+            FactRow(SystemNav.honorBackgroundActivityPath)
+        } else {
+            FactRow("自启动：在系统设置里允许轻跳自启动")
+        }
         FactRow("多任务：在最近任务里把轻跳卡片下拉锁定")
     }
 }

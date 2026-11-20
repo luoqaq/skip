@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.runtime.Composable
@@ -374,6 +375,17 @@ class AppState(private val context: Context) {
 
 /** 通用系统设置跳转与检测（主进程各页面共用）。 */
 object SystemNav {
+    val isHonor: Boolean
+        get() = Build.MANUFACTURER.equals("HONOR", ignoreCase = true) ||
+            Build.BRAND.equals("HONOR", ignoreCase = true)
+
+    const val honorBackgroundActivityPath =
+        "设置 → 应用 → 应用启动管理 → 轻跳。关闭自动管理，开启允许后台活动。"
+
+    fun openHonorBackgroundSettings(context: Context) {
+        context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
 
     fun isIgnoringBattery(context: Context): Boolean {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
